@@ -5,7 +5,8 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QLabel, QFileDialog, QTableWidget,
-    QTableWidgetItem, QTextEdit, QSplitter, QMessageBox
+    QTableWidgetItem, QTextEdit, QSplitter, QMessageBox,
+    QHeaderView
 )
 
 from .video_player import VideoPlayer
@@ -103,17 +104,52 @@ class MainWindow(QMainWindow):
         # Bottom section: Results and LLM chat
         splitter = QSplitter(Qt.Horizontal)
         
-        # Results table
+        # Results section
         results_widget = QWidget()
         results_layout = QVBoxLayout(results_widget)
-        results_layout.addWidget(QLabel("Analysis Results"))
+        results_layout.addWidget(QLabel("Gait Analysis Results"))
         
+        # Gait metrics table (Step Time, Walking Speed, Step Length, Cadence)
         self.results_table = QTableWidget()
-        self.results_table.setColumnCount(4)
+        self.results_table.setRowCount(3)
+        self.results_table.setColumnCount(5)
         self.results_table.setHorizontalHeaderLabels([
-            "Joint", "Video A ROM", "Video B ROM", "Difference"
+            "", "Walking Speed\n(m/s)", "Cadence\n(steps/min)", "Step Length\n(cm)", "Step Time\n(s)"
         ])
+        self.results_table.setVerticalHeaderLabels(["Video A", "Video B", "Difference"])
+        
+        # Set row labels in first column
+        self.results_table.setItem(0, 0, QTableWidgetItem("Video A"))
+        self.results_table.setItem(1, 0, QTableWidgetItem("Video B"))
+        self.results_table.setItem(2, 0, QTableWidgetItem("Difference"))
+        
+        # Style the table - make columns stretch to fill available space
+        self.results_table.setAlternatingRowColors(True)
+        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.results_table.verticalHeader().setVisible(False)  # Hide vertical header since we have row labels
+        self.results_table.setMinimumHeight(120)
+        
         results_layout.addWidget(self.results_table)
+        
+        # Joint info section (placeholder for future detailed metrics)
+        rom_label = QLabel("Joint Info (placeholder)")
+        results_layout.addWidget(rom_label)
+        
+        self.rom_table = QTableWidget()
+        self.rom_table.setRowCount(3)
+        self.rom_table.setColumnCount(5)
+        self.rom_table.setHorizontalHeaderLabels([
+            "", "Left Knee", "Right Knee", "Left Hip", "Right Hip"
+        ])
+        self.rom_table.setItem(0, 0, QTableWidgetItem("Video A"))
+        self.rom_table.setItem(1, 0, QTableWidgetItem("Video B"))
+        self.rom_table.setItem(2, 0, QTableWidgetItem("Difference"))
+        self.rom_table.setAlternatingRowColors(True)
+        self.rom_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.rom_table.verticalHeader().setVisible(False)
+        self.rom_table.setMinimumHeight(120)
+        
+        results_layout.addWidget(self.rom_table)
         
         splitter.addWidget(results_widget)
         
@@ -230,31 +266,69 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message)
     
     def _update_results_table(self, results):
-        """Update the results table with analysis data"""
-        comparison = results.get('comparison', {})
+        """Update the results tables with analysis data"""
+        # Update gait metrics table
+        gait_comparison = results.get('gait_comparison', {})
         
-        joints = ['left_knee', 'right_knee', 'left_hip', 'right_hip']
-        self.results_table.setRowCount(len(joints))
+        # Order matches new headers: Walking Speed, Cadence, Step Length, Step Time
+        metrics = ['walking_speed', 'cadence', 'step_length', 'step_time']
         
-        for i, joint in enumerate(joints):
-            joint_data = comparison.get(joint, {})
+        for col, metric in enumerate(metrics, start=1):
+            metric_data = gait_comparison.get(metric, {})
             
-            # Joint name
-            self.results_table.setItem(i, 0, QTableWidgetItem(joint.replace('_', ' ').title()))
+            # Video A value
+            video_a_val = metric_data.get('video_a', 0)
+            item_a = QTableWidgetItem(f"{video_a_val:.2f}")
+            item_a.setTextAlignment(Qt.AlignCenter)
+            self.results_table.setItem(0, col, item_a)
+            
+            # Video B value
+            video_b_val = metric_data.get('video_b', 0)
+            item_b = QTableWidgetItem(f"{video_b_val:.2f}")
+            item_b.setTextAlignment(Qt.AlignCenter)
+            self.results_table.setItem(1, col, item_b)
+            
+            # Difference with color coding
+            diff = metric_data.get('difference', 0)
+            diff_item = QTableWidgetItem(f"{diff:+.2f}")
+            diff_item.setTextAlignment(Qt.AlignCenter)
+            
+            # Color code: green for improvement, red for decline (context-dependent)
+            if diff > 0:
+                diff_item.setBackground(Qt.green)
+            elif diff < 0:
+                diff_item.setBackground(Qt.red)
+            
+            self.results_table.setItem(2, col, diff_item)
+        
+        self.results_table.resizeColumnsToContents()
+        
+        # Update ROM table
+        comparison = results.get('comparison', {})
+        joints = ['left_knee', 'right_knee', 'left_hip', 'right_hip']
+        
+        for col, joint in enumerate(joints, start=1):
+            joint_data = comparison.get(joint, {})
             
             # Video A ROM
             video_a_range = joint_data.get('video_a_range', 0)
-            self.results_table.setItem(i, 1, QTableWidgetItem(f"{video_a_range:.2f}°"))
+            item_a = QTableWidgetItem(f"{video_a_range:.1f}°")
+            item_a.setTextAlignment(Qt.AlignCenter)
+            self.rom_table.setItem(0, col, item_a)
             
             # Video B ROM
             video_b_range = joint_data.get('video_b_range', 0)
-            self.results_table.setItem(i, 2, QTableWidgetItem(f"{video_b_range:.2f}°"))
+            item_b = QTableWidgetItem(f"{video_b_range:.1f}°")
+            item_b.setTextAlignment(Qt.AlignCenter)
+            self.rom_table.setItem(1, col, item_b)
             
             # Difference
             range_diff = joint_data.get('range_diff', 0)
-            self.results_table.setItem(i, 3, QTableWidgetItem(f"{range_diff:+.2f}°"))
+            diff_item = QTableWidgetItem(f"{range_diff:+.1f}°")
+            diff_item.setTextAlignment(Qt.AlignCenter)
+            self.rom_table.setItem(2, col, diff_item)
         
-        self.results_table.resizeColumnsToContents()
+        self.rom_table.resizeColumnsToContents()
     
     def _send_chat_message(self):
         """Send chat message (echo placeholder)"""
