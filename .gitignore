@@ -3,40 +3,45 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
 
-# Virtual environments
+# Virtual Environment
+.venv/
 venv/
-ENV/
-env/
+.env
+
+# Type Checking & Testing
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
 
 # IDE
 .vscode/
 .idea/
 *.swp
-*.swo
 
-# Application specific
+# Jupyter
+.ipynb_checkpoints/
+
+# Project Specific
 runs/
+logs/
+*.log
+.gaitdiff/
+
+# Test videos (keep folder, ignore contents)
+test_videos/*
+!test_videos/.gitkeep
+
+# Video Files
 *.mp4
 *.avi
 *.mov
-.gaitdiff/
+*.mkv
 
 # OS
 .DS_Store
