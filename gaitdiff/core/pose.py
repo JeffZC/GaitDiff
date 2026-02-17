@@ -75,10 +75,10 @@ class PoseDetector:
                 for landmark in landmarks:
                     x = int(landmark.x * w)
                     y = int(landmark.y * h)
-                    cv2.circle(annotated_frame, (x, y), 3, (0, 255, 0), -1)
+                    cv2.circle(annotated_frame, (x, y), 5, (0, 255, 0), -1)
                 
                 # Draw connections
-                connections = mp.tasks.vision.PoseLandmarksConnections.POSE_CONNECTIONS
+                connections = mp.tasks.vision.PoseLandmarksConnections.POSE_LANDMARKS
                 for connection in connections:
                     start_idx = connection.start
                     end_idx = connection.end
@@ -149,7 +149,10 @@ def compute_rom(angle_history: List[float]) -> Dict[str, float]:
     if not angle_history:
         return {'min': 0, 'max': 0, 'range': 0, 'mean': 0}
     
-    angles = np.array(angle_history)
+    angles = np.array(angle_history, dtype=float)
+    angles = angles[np.isfinite(angles)]
+    if angles.size == 0:
+        return {'min': 0, 'max': 0, 'range': 0, 'mean': 0}
     return {
         'min': float(np.min(angles)),
         'max': float(np.max(angles)),

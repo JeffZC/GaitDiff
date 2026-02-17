@@ -46,3 +46,4 @@ test_videos/*
 # OS
 .DS_Store
 Thumbs.db
+gait_report_*.html

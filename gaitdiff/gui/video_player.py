@@ -1,15 +1,18 @@
 """Video player widget with pose overlay and advanced controls"""
 import cv2
 import numpy as np
+import subprocess
+import os
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout,
-    QSlider, QComboBox, QCheckBox, QGroupBox, QSpinBox
+    QSlider, QComboBox, QCheckBox, QGroupBox, QSpinBox, QMessageBox
 )
 
 from ..core.video import VideoReader
 from ..core.pose import PoseDetector
+from ..pose_editor import get_shared_state
 
 
 class VideoPlayer(QWidget):
@@ -17,11 +20,20 @@ class VideoPlayer(QWidget):
     
     # Signal emitted when frame changes (for syncing players)
     frame_changed = Signal(int)
+    # Signal to request opening pose editor
+    open_pose_editor = Signal(str)  # Emits video path
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.video_reader = None
-        self.pose_detector = PoseDetector()
+        self.video_path = None  # Store the loaded video path
+        
+        try:
+            self.pose_detector = PoseDetector()
+        except Exception as e:
+            print(f"Warning: Failed to initialize PoseDetector: {e}")
+            self.pose_detector = None
+        
         self.current_frame = 0
         self.is_playing = False
         self.show_pose = False
@@ -33,7 +45,15 @@ class VideoPlayer(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self._update_frame)
         
+        # Shared state for pose editor integration
+        self.shared_state = get_shared_state()
+        self.video_id = None  # Will be set when video is loaded
+        self.pose_data = None  # Pose data from shared state
+        
         self._init_ui()
+        
+        # Connect to shared state for pose editor integration
+        self.shared_state.pose_data_changed.connect(self._on_pose_data_changed)
     
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -160,20 +180,53 @@ class VideoPlayer(QWidget):
         visual_layout.addWidget(self.reset_btn)
         
         layout.addLayout(visual_layout)
+        
+        # Pose Editor button row
+        editor_layout = QHBoxLayout()
+        self.pose_editor_btn = QPushButton("🔧 Edit in Pose Editor")
+        self.pose_editor_btn.clicked.connect(self._open_pose_editor)
+        self.pose_editor_btn.setEnabled(False)
+        self.pose_editor_btn.setToolTip("Open this video in the external Pose Editor tool")
+        editor_layout.addWidget(self.pose_editor_btn)
+        editor_layout.addStretch()
+        layout.addLayout(editor_layout)
     
     def load_video(self, video_path: str):
         """Load a video file"""
         if self.video_reader:
             self.video_reader.release()
         
-        self.video_reader = VideoReader(video_path)
+        self.video_path = video_path  # Store the path
+        
+        try:
+            self.video_reader = VideoReader(video_path)
+        except Exception as e:
+            self.video_reader = None
+            self.video_path = None
+            raise RuntimeError(f"Failed to load video: {str(e)}")
+        
         self.current_frame = 0
         self.is_playing = False
         self.play_pause_btn.setText("▶")
         
-        # Enable all controls
+        # Set video ID based on which player this is (A or B)
+        # This will be set by the parent widget
+        if not hasattr(self, 'video_id') or self.video_id is None:
+            # Default to 'A' if not set
+            self.video_id = 'A'
+        
+        # Sync current frame to shared state (frame_count and video_path already set by main_window)
+        self.shared_state.set_current_frame(self.video_id, 0)
+        
+        # Check if pose data already exists in shared state
+        existing_pose_data = self.shared_state.get_pose_data(self.video_id)
+        if existing_pose_data is not None:
+            self.pose_data = existing_pose_data
+        
+        # Enable controls (pose checkbox will be enabled when pose processing completes)
         self.play_pause_btn.setEnabled(True)
-        self.pose_checkbox.setEnabled(True)
+        self.pose_checkbox.setEnabled(existing_pose_data is not None)  # Only enable if pose data exists
+        self.pose_checkbox.setToolTip("Pose data is being processed..." if existing_pose_data is None else "Show/hide pose overlay")
         self.bw_checkbox.setEnabled(True)
         self.frame_slider.setEnabled(True)
         self.prev_btn.setEnabled(True)
@@ -181,6 +234,7 @@ class VideoPlayer(QWidget):
         self.brightness_slider.setEnabled(True)
         self.contrast_slider.setEnabled(True)
         self.reset_btn.setEnabled(True)
+        self.pose_editor_btn.setEnabled(True)
         
         # Setup frame slider
         self.frame_slider.setMaximum(self.video_reader.frame_count - 1)
@@ -246,7 +300,7 @@ class VideoPlayer(QWidget):
     
     def _toggle_bw(self, state):
         """Toggle black and white mode"""
-        self.black_and_white = state == Qt.Checked
+        self.black_and_white = (state == 2)  # Qt.CheckState.Checked.value is 2
         if not self.is_playing:
             self._display_frame(self.current_frame)
     
@@ -273,6 +327,35 @@ class VideoPlayer(QWidget):
         if not self.is_playing:
             self._display_frame(self.current_frame)
     
+    def _open_pose_editor(self):
+        """Open the integrated Pose Editor window with shared state."""
+        if not self.video_path:
+            QMessageBox.warning(self, "No Video", "Please load a video first.")
+            return
+        
+        # Import here to avoid circular import at module level
+        try:
+            from ..pose_editor import get_shared_state, PoseEditorWindow
+        except ImportError as e:
+            QMessageBox.critical(self, "Error", f"Pose Editor integration failed: {e}")
+            return
+        
+        # Use this player's assigned slot id (A or B)
+        video_id = self.video_id or 'A'
+        shared_state = get_shared_state()
+        
+        # Ensure shared_state is up-to-date for this slot
+        shared_state.set_current_frame(video_id, self.current_frame)
+        
+        # Sync current player pose data into shared_state if it's fresher
+        pose_data = getattr(self, 'pose_data', None)
+        if pose_data is not None:
+            shared_state.set_pose_data(video_id, pose_data)
+        
+        # Launch the editor window
+        self._pose_editor_window = PoseEditorWindow(video_id=video_id)
+        self._pose_editor_window.show()
+    
     def _start_timer(self):
         """Start the playback timer with current speed"""
         if self.video_reader:
@@ -296,8 +379,36 @@ class VideoPlayer(QWidget):
     
     def _toggle_pose(self, state):
         """Toggle pose overlay"""
-        self.show_pose = state == Qt.Checked
+        # Only allow enabling if pose data exists
+        if (state == 2) and self.pose_data is None:  # Qt.CheckState.Checked.value is 2
+            self.pose_checkbox.setChecked(False)
+            return
+        
+        self.show_pose = (state == 2)  # Qt.CheckState.Checked.value is 2
         if not self.is_playing:
+            self._display_frame(self.current_frame)
+    
+    def _on_pose_data_changed(self, video_id: str):
+        """Handle pose data changes from pose editor"""
+        if video_id != self.video_id:
+            return
+        
+        # Update local pose data from shared state
+        pose_data = self.shared_state.get_pose_data(video_id)
+        self.pose_data = pose_data
+        
+        # Update checkbox state based on pose data availability
+        has_pose_data = pose_data is not None
+        self.pose_checkbox.setEnabled(has_pose_data)
+        
+        # If pose data was removed while overlay was enabled, turn it off
+        if not has_pose_data and self.show_pose:
+            self.show_pose = False
+            self.pose_checkbox.setChecked(False)
+        
+        # Refresh display if pose overlay is enabled and not playing
+        # Only if video is actually loaded
+        if self.show_pose and not self.is_playing and self.video_reader:
             self._display_frame(self.current_frame)
     
     def _update_frame(self):
@@ -337,32 +448,66 @@ class VideoPlayer(QWidget):
         if not self.video_reader:
             return
         
-        frame = self.video_reader.read_frame(frame_number)
+        try:
+            frame = self.video_reader.read_frame(frame_number)
+        except Exception:
+            return  # Silently skip bad frames
+        
         if frame is None:
             return
         
-        # Apply visual adjustments
-        frame = self._apply_adjustments(frame)
+        try:
+            # Apply visual adjustments
+            frame = self._apply_adjustments(frame)
+            
+            # Apply pose overlay if enabled
+            if self.show_pose:
+                if self.pose_data is not None and frame_number < len(self.pose_data):
+                    # Use pose data from shared state (edited in pose editor)
+                    pose_row = self.pose_data.iloc[frame_number]
+                    frame = self._draw_pose_overlay(frame, pose_row)
+                else:
+                    # Fallback to live pose detection if no edited data available
+                    try:
+                        pose_results = self.pose_detector.detect(frame)
+                        frame = self.pose_detector.draw_landmarks(frame, pose_results)
+                    except Exception:
+                        pass  # Skip pose overlay if detection fails
+            
+            # Convert to QPixmap and display
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = frame_rgb.shape
+            bytes_per_line = ch * w
+            qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
+            
+            # Scale to fit label while maintaining aspect ratio
+            pixmap = QPixmap.fromImage(qt_image)
+            scaled_pixmap = pixmap.scaled(
+                self.video_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.video_label.setPixmap(scaled_pixmap)
+        except Exception:
+            # If any display operation fails, silently skip
+            pass
+    
+    def _draw_pose_overlay(self, frame, pose_row):
+        """Draw pose overlay using pose data from DataFrame, forcibly converting to RR21 format."""
+        from ..pose_editor.mediapipe_utils import get_frame_with_pose_overlay
+        from ..pose_editor.pose_format_utils import SUPPORTED_FORMATS
+        import numpy as np
         
-        # Apply pose overlay if enabled
-        if self.show_pose:
-            pose_results = self.pose_detector.detect(frame)
-            frame = self.pose_detector.draw_landmarks(frame, pose_results)
+        # Always build a flat RR21 array: [NOSE_X, NOSE_Y, LEFT_EYE_X, LEFT_EYE_Y, ...]
+        keypoint_names = SUPPORTED_FORMATS["rr21"]
+        rr21_coords = []
+        for name in keypoint_names:
+            x = pose_row.get(f"{name}_X", 0)
+            y = pose_row.get(f"{name}_Y", 0)
+            rr21_coords.extend([x, y])
+        rr21_array = np.array(rr21_coords, dtype=np.float32)
         
-        # Convert to QPixmap and display
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = frame_rgb.shape
-        bytes_per_line = ch * w
-        qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
-        
-        # Scale to fit label while maintaining aspect ratio
-        pixmap = QPixmap.fromImage(qt_image)
-        scaled_pixmap = pixmap.scaled(
-            self.video_label.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
-        )
-        self.video_label.setPixmap(scaled_pixmap)
+        return get_frame_with_pose_overlay(frame, rr21_array)
     
     def seek_to_frame(self, frame_number: int):
         """Seek to a specific frame (for external sync)"""
@@ -385,4 +530,8 @@ class VideoPlayer(QWidget):
         self.stop()
         if self.video_reader:
             self.video_reader.release()
-        self.pose_detector.release()
+        if self.pose_detector:
+            try:
+                self.pose_detector.release()
+            except Exception:
+                pass  # Ignore cleanup errors

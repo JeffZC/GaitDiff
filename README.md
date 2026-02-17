@@ -42,7 +42,19 @@ python -m gaitdiff
 
 ### LLM Chat Panel
 
-The chat panel is a placeholder that echoes messages. This can be extended to integrate with language models for insights and recommendations.
+The chat panel uses Azure OpenAI with Azure AD credentials (no API key in code). Endpoint and deployment can be stored in the OS keyring under `SERVICE="gaitdiff"` or provided as environment variables. Keys are never committed.
+
+Keyring setup:
+```bash
+python -c "import keyring; keyring.set_password('gaitdiff','AZURE_OPENAI_ENDPOINT','https://ai-gait-us1.openai.azure.com/')"
+python -c "import keyring; keyring.set_password('gaitdiff','AZURE_OPENAI_DEPLOYMENT','gpt-5-mini')"
+```
+
+Environment variable fallback:
+```bash
+set AZURE_OPENAI_ENDPOINT=https://ai-gait-us1.openai.azure.com/
+set AZURE_OPENAI_DEPLOYMENT=gpt-5-mini
+```
 
 ## Architecture
 
