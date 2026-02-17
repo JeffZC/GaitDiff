@@ -46,4 +46,9 @@ test_videos/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated reports and test outputs
 gait_report_*.html
+test_*_output.*
+test_output.*
+*_output.jpg

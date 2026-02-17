@@ -1,0 +1,23 @@
+# Auto-detect text files and normalize to LF in repo
+* text=auto eol=lf
+
+# Explicitly declare text files
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+
+# Declare files that should stay CRLF (Windows scripts)
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.mov binary
+*.avi binary
+*.mkv binary
